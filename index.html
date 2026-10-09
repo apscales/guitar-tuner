@@ -330,12 +330,20 @@ function escapeHTML(s){ return s.replace(/[&<>"]/g, c => ({'&':'&amp;','<':'&lt;
 let ctx, analyser, buf, yinBuf, running = false, frame = 0;
 const IN_TUNE = 4;   // cents
 async function start(){
-  const err = $('err'); err.hidden = true;
+  const err = $('err'), btn = $('startBtn'); err.hidden = true;
+  // iPhone Safari only lets audio start inside the tap itself, so the AudioContext
+  // is created and resumed here, before waiting on the microphone prompt.
+  try { ctx = ctx || new (window.AudioContext || window.webkitAudioContext)(); ctx.resume(); } catch {}
+  btn.textContent = 'Starting...';
+  const slow = setTimeout(() => {
+    err.hidden = false;
+    err.textContent = 'Still waiting on the microphone. If no prompt showed up, open this page in Safari or Chrome itself (not inside another app), then tap Start again.';
+  }, 6000);
   try {
     if (!navigator.mediaDevices || !navigator.mediaDevices.getUserMedia) throw new Error('nomedia');
     const stream = await navigator.mediaDevices.getUserMedia({audio:{echoCancellation:false, noiseSuppression:false, autoGainControl:false}});
-    ctx = ctx || new (window.AudioContext || window.webkitAudioContext)();
-    await ctx.resume();
+    clearTimeout(slow);
+    if (ctx.state !== 'running') ctx.resume();
     const src = ctx.createMediaStreamSource(stream);
     const hp = ctx.createBiquadFilter(); hp.type = 'highpass'; hp.frequency.value = 45;
     analyser = ctx.createAnalyser(); analyser.fftSize = 4096;
@@ -343,6 +351,7 @@ async function start(){
     buf = new Float32Array(analyser.fftSize); yinBuf = new Float32Array(analyser.fftSize/2);
     running = true; $('overlay').hidden = true; keepAwake(); loop();
   } catch (e) {
+    clearTimeout(slow); btn.textContent = 'Start tuner';
     err.hidden = false;
     err.textContent = e && e.name === 'NotAllowedError' ? 'Microphone access was blocked. Allow the microphone for this site in your browser settings, then tap Start again.'
       : e && e.message === 'nomedia' ? 'This browser cannot use the microphone here. Open the page over https in Safari or Chrome.'
@@ -351,6 +360,7 @@ async function start(){
 }
 $('startBtn').onclick = start;
 
+document.addEventListener('pointerdown', () => { if (ctx && ctx.state !== 'running') ctx.resume(); });
 let wake = null;
 async function keepAwake(){ try { wake = await navigator.wakeLock.request('screen'); } catch {} }
 document.addEventListener('visibilitychange', () => {
